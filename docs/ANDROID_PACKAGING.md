@@ -1,4 +1,4 @@
-# 本地视频播放器 · Android 打包指南
+# Local Video Hub · Android 打包指南
 
 本项目是一个纯前端的网页版本地视频播放器，基于 Next.js 16 + TypeScript + Tailwind CSS 构建。所有视频文件存储在浏览器 IndexedDB 中，**不会上传到服务器**，因此非常适合通过 Capacitor 打包为 Android 应用，实现"安装即用"的本地视频播放体验。
 
@@ -33,7 +33,7 @@ bun add @capacitor/core @capacitor/cli
 bun add @capacitor/android
 
 # 初始化 Capacitor 配置
-bunx cap init "本地视频播放器" "com.localplayer.app" --web-dir=out
+bunx cap init "Local Video Hub" "com.localvideohub.app" --web-dir=out
 ```
 
 这会生成 `capacitor.config.ts`，内容类似：
@@ -42,8 +42,8 @@ bunx cap init "本地视频播放器" "com.localplayer.app" --web-dir=out
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.localplayer.app',
-  appName: '本地视频播放器',
+  appId: 'com.localvideohub.app',
+  appName: 'Local Video Hub',
   webDir: 'out', // Next.js 静态导出目录
   server: {
     androidScheme: 'https',

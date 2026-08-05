@@ -1,7 +1,7 @@
 {
-  "name": "本地视频播放器",
-  "short_name": "视频播放器",
-  "description": "纯前端本地视频播放器，支持手动添加、文件夹扫描、完整播放控制",
+  "name": "Local Video Hub",
+  "short_name": "Video Hub",
+  "description": "A web video player for local files, URLs, LAN shares, and Baidu Pan streams.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",

@@ -15,10 +15,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "家庭视频播放器 | Local Video Player",
+  title: "Local Video Hub",
   description:
-    "纯前端本地视频播放器：支持本地视频、服务器局域网共享视频、百度网盘视频三种来源，提供快进、快退、暂停、倍速等完整播放控制。所有数据本地存储，可离线使用，可通过 Capacitor 打包为 Android 应用。",
+    "A web video player for local files, URLs, LAN shares, and Baidu Pan streams, with full playback controls and offline-friendly local storage.",
   keywords: [
+    "Local Video Hub",
     "视频播放器",
     "本地视频",
     "局域网共享",
@@ -28,12 +29,12 @@ export const metadata: Metadata = {
     "Capacitor",
     "Android",
   ],
-  authors: [{ name: "Local Video Player" }],
+  authors: [{ name: "Local Video Hub" }],
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "家庭视频播放器",
+    title: "Local Video Hub",
   },
 };
 

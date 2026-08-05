@@ -326,7 +326,7 @@ export default function Home() {
             <Video className="w-4 h-4 text-primary-foreground" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold truncate">家庭视频播放器</h1>
+            <h1 className="text-sm font-semibold truncate">Local Video Hub</h1>
             <p className="text-[10px] text-muted-foreground hidden sm:block">
               Local + Server + 百度网盘 · 局域网共享 · 离线可用
             </p>
@@ -575,7 +575,7 @@ export default function Home() {
       {/* 底部 Footer */}
       <footer className="flex-shrink-0 h-7 border-t bg-background px-3 md:px-4 flex items-center justify-between text-[10px] text-muted-foreground">
         <span>
-          本地视频播放器 · 本地文件存于浏览器，服务器与网盘视频通过后端流代理播放
+          Local Video Hub · 本地文件存于浏览器，服务器与网盘视频通过后端流代理播放
         </span>
         <span className="hidden sm:flex items-center gap-1">
           <Github className="w-3 h-3" />
