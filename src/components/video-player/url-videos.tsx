@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Link as LinkIcon,
   Plus,
   Trash2,
+  Download,
+  Upload,
   Loader2,
   AlertCircle,
   RefreshCw,
@@ -42,6 +44,8 @@ import {
   deleteUrlVideo,
   loadUrlVideos,
   clearAllUrlVideos,
+  exportUrlVideosPayload,
+  importUrlVideosPayload,
   isValidVideoUrl,
   isSameOrigin,
   type UrlVideo,
@@ -53,7 +57,7 @@ interface UrlVideosProps {
 }
 
 export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
-  const [videos, setVideos] = useState<UrlVideo[]>([]);
+  const [videos, setVideos] = useState<UrlVideo[]>(() => loadUrlVideos());
   const [search, setSearch] = useState("");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
@@ -61,16 +65,14 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
     setVideos(loadUrlVideos());
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
   // 添加表单状态
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
   const [newNote, setNewNote] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -114,6 +116,63 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
     refresh();
   };
 
+  const handleExport = () => {
+    const payload = exportUrlVideosPayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.href = url;
+    a.download = `url-playlist-${timestamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setImportMessage(`已导出 ${payload.videos.length} 条 URL 视频`);
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+
+      const file: File | null = await new Promise((resolve) => {
+        input.onchange = () => resolve(input.files?.[0] ?? null);
+        input.click();
+      });
+
+      if (!file) return;
+
+      const text = await file.text();
+      let payload: unknown;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        setImportMessage("导入失败：文件不是合法 JSON");
+        return;
+      }
+
+      const res = importUrlVideosPayload(payload, "merge");
+      if (!res.success) {
+        setImportMessage(`导入失败：${res.error}`);
+        return;
+      }
+
+      const { imported, duplicates, invalid, total } = res.result;
+      setImportMessage(
+        `导入完成：共 ${total} 条，新增 ${imported} 条，重复 ${duplicates} 条，无效 ${invalid} 条`,
+      );
+      refresh();
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleSelect = (video: UrlVideo) => {
     // 同源 URL 直连；跨域 URL 也直连（绝大多数服务器支持 CORS 或 <video> 标签豁免）
     // 跨域 seek 受限的极端情况，用户可在右键菜单选"通过代理播放"
@@ -134,6 +193,29 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
             URL 视频
           </h2>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleExport}
+              className="h-7 w-7"
+              title="导出 URL 播放列表"
+            >
+              <Upload className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => void handleImport()}
+              className="h-7 w-7"
+              title="导入 URL 播放列表"
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -235,6 +317,10 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
             className="h-8 pl-8 text-sm"
           />
         </div>
+
+        {importMessage && (
+          <p className="mt-2 text-[11px] text-muted-foreground">{importMessage}</p>
+        )}
       </div>
 
       {/* 列表 */}
