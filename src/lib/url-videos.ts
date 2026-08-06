@@ -11,6 +11,8 @@
  */
 
 const STORAGE_KEY = "video-player:url-videos";
+const EXPORT_KIND = "url-videos-playlist";
+const EXPORT_VERSION = 1;
 
 export interface UrlVideo {
   /** 唯一 ID */
@@ -29,6 +31,20 @@ export interface UrlVideo {
   duration?: number;
   /** 备注（可选） */
   note?: string;
+}
+
+export interface UrlVideosExportPayload {
+  kind: typeof EXPORT_KIND;
+  version: typeof EXPORT_VERSION;
+  exportedAt: number;
+  videos: UrlVideo[];
+}
+
+export interface UrlVideosImportResult {
+  total: number;
+  imported: number;
+  duplicates: number;
+  invalid: number;
 }
 
 /** 生成唯一 ID */
@@ -163,4 +179,106 @@ export function updateUrlVideo(
 /** 清空全部 */
 export function clearAllUrlVideos(): void {
   saveUrlVideos([]);
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+function normalizeImportedVideo(raw: unknown): UrlVideo | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const item = raw as Partial<UrlVideo>;
+  const url = typeof item.url === "string" ? item.url.trim() : "";
+  const validation = isValidVideoUrl(url);
+  if (!validation.valid) return null;
+
+  const name =
+    typeof item.name === "string" && item.name.trim()
+      ? item.name.trim()
+      : deriveNameFromUrl(url);
+
+  return {
+    id: typeof item.id === "string" && item.id.trim() ? item.id : generateId(),
+    name,
+    url,
+    addedAt: toFiniteNumber(item.addedAt) ?? Date.now(),
+    lastPlayedAt: toFiniteNumber(item.lastPlayedAt),
+    lastPosition: toFiniteNumber(item.lastPosition),
+    duration: toFiniteNumber(item.duration),
+    note:
+      typeof item.note === "string" && item.note.trim()
+        ? item.note.trim()
+        : undefined,
+  };
+}
+
+/** 导出 URL 播放列表（用于下载为 JSON 文件） */
+export function exportUrlVideosPayload(): UrlVideosExportPayload {
+  return {
+    kind: EXPORT_KIND,
+    version: EXPORT_VERSION,
+    exportedAt: Date.now(),
+    videos: loadUrlVideos(),
+  };
+}
+
+/**
+ * 导入 URL 播放列表
+ * - mode=merge: 与现有列表合并（按 url 去重）
+ * - mode=replace: 替换现有列表
+ */
+export function importUrlVideosPayload(
+  payload: unknown,
+  mode: "merge" | "replace" = "merge",
+): { success: true; result: UrlVideosImportResult } | { success: false; error: string } {
+  let incoming: unknown[] = [];
+
+  if (Array.isArray(payload)) {
+    incoming = payload;
+  } else if (payload && typeof payload === "object") {
+    const maybe = payload as { videos?: unknown };
+    if (!Array.isArray(maybe.videos)) {
+      return { success: false, error: "导入文件格式不正确：缺少 videos 数组" };
+    }
+    incoming = maybe.videos;
+  } else {
+    return { success: false, error: "导入文件格式不正确" };
+  }
+
+  const existing = mode === "replace" ? [] : loadUrlVideos();
+  const existingUrls = new Set(existing.map((v) => v.url));
+
+  let imported = 0;
+  let duplicates = 0;
+  let invalid = 0;
+  const additions: UrlVideo[] = [];
+
+  for (const raw of incoming) {
+    const normalized = normalizeImportedVideo(raw);
+    if (!normalized) {
+      invalid += 1;
+      continue;
+    }
+    if (existingUrls.has(normalized.url)) {
+      duplicates += 1;
+      continue;
+    }
+    existingUrls.add(normalized.url);
+    additions.push(normalized);
+    imported += 1;
+  }
+
+  saveUrlVideos([...additions, ...existing]);
+
+  return {
+    success: true,
+    result: {
+      total: incoming.length,
+      imported,
+      duplicates,
+      invalid,
+    },
+  };
 }
