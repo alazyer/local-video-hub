@@ -21,9 +21,21 @@ import { NextRequest } from "next/server";
 import http from "http";
 import https from "https";
 import { Readable } from "stream";
+import {
+  parseClientRange,
+  formatContentRange,
+  createRangeSlicingStream,
+} from "@/lib/http-proxy-range";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+function inferManifestMimeType(pathname: string): string | null {
+  const lower = pathname.toLowerCase();
+  if (lower.endsWith(".m3u8")) return "application/vnd.apple.mpegurl";
+  if (lower.endsWith(".mpd")) return "application/dash+xml";
+  return null;
+}
 
 /** 解析目标 URL 并校验安全性 */
 function parseTargetUrl(urlStr: string): URL | null {
@@ -166,12 +178,18 @@ export async function GET(req: NextRequest) {
       "accept-ranges",
       "last-modified",
       "etag",
+      "cache-control",
+      "expires",
     ];
     for (const h of passthroughHeaders) {
       const v = upstreamHeadersRaw[h];
       if (v) {
         respHeaders.set(h, Array.isArray(v) ? v[0] : v);
       }
+    }
+    const manifestMimeType = inferManifestMimeType(target.pathname);
+    if (manifestMimeType) {
+      respHeaders.set("content-type", manifestMimeType);
     }
     if (!respHeaders.has("content-type")) {
       respHeaders.set("content-type", "application/octet-stream");
@@ -186,9 +204,71 @@ export async function GET(req: NextRequest) {
       "access-control-expose-headers",
       "Content-Range, Content-Length, Accept-Ranges",
     );
-    respHeaders.set("cache-control", "no-store");
+    // 允许浏览器按字节分段缓存（边下边播时更友好），
+    // 若上游未提供缓存策略，则给一个温和的默认值。
+    if (!respHeaders.has("cache-control")) {
+      respHeaders.set("cache-control", "public, max-age=3600, stale-while-revalidate=86400");
+    }
+    // Range 请求和非 Range 请求应区分缓存键。
+    respHeaders.set("vary", "Range");
+    if (manifestMimeType) {
+      respHeaders.set("x-streaming-diagnostic", "manifest-proxied-with-cors");
+    }
 
     const webStream = nodeStreamToWebStream(body);
+
+    // ── 服务端 Range 合成 ─────────────────────────────────────────────
+    // 当客户端发送了 Range 但上游返回 200（忽略 Range，整文件下载）时，
+    // 代理自行切片合成 206/Content-Range，只输出请求的字节窗口。
+    // 上游已返回 206 时保持透明透传不变（不重复切片）。
+    const clientRange = range;
+    const upstreamIgnoredRange =
+      clientRange && status === 200 && !respHeaders.has("content-range");
+
+    if (clientRange && upstreamIgnoredRange) {
+      const upstreamContentLength = respHeaders.get("content-length");
+      const total =
+        upstreamContentLength != null
+          ? parseInt(upstreamContentLength, 10)
+          : null;
+
+      const rangeParsed = parseClientRange(clientRange, total);
+
+      if (rangeParsed) {
+        const { start, end } = rangeParsed;
+        const windowSize = end - start + 1;
+
+        // 覆盖响应为合成 206
+        respHeaders.set("content-range", formatContentRange(start, end, total));
+        respHeaders.set("content-length", String(windowSize));
+        respHeaders.set("accept-ranges", "bytes");
+        // 200 整文件响应不应被 Range 合成结果缓存命中为不同请求
+        respHeaders.set("cache-control", "no-store");
+        respHeaders.delete("vary");
+        respHeaders.set("vary", "Range");
+        respHeaders.set("x-streaming-diagnostic", "range-synthesized");
+
+        // 切片流：丢弃 start 前字节，输出窗口字节，输出 end 后取消上游读取
+        const slicingStream = createRangeSlicingStream(start, end, () => {
+          // 输出窗口后销毁上游 node stream，停止读取剩余字节
+          try {
+            body.destroy();
+          } catch {
+            // 已销毁，忽略
+          }
+        });
+
+        const synthesized = webStream.pipeThrough(slicingStream);
+
+        return new Response(synthesized, {
+          status: 206,
+          statusText: "Partial Content",
+          headers: respHeaders,
+        });
+      }
+      // 无效/畸形 Range → 回退到下方 200 透传
+    }
+    // ──────────────────────────────────────────────────────────────
 
     return new Response(webStream, {
       status,

@@ -21,6 +21,8 @@ export const VIDEO_EXTENSIONS = [
   "ts",
   "rmvb",
   "rm",
+  "m3u8",
+  "mpd",
 ];
 
 /** 浏览器原生支持的视频扩展名（无需转码） */
@@ -31,6 +33,8 @@ export const BROWSER_NATIVE_EXTENSIONS = [
   "ogv",
   "mov",
   "m4v",
+  "m3u8",
+  "mpd",
 ];
 
 /** 文件信息（前端可见的形态） */
@@ -77,6 +81,10 @@ export function getMimeType(ext: string): string {
     case "rmvb":
     case "rm":
       return "application/vnd.rn-realmedia-vbr";
+    case "m3u8":
+      return "application/vnd.apple.mpegurl";
+    case "mpd":
+      return "application/dash+xml";
     default:
       return "application/octet-stream";
   }

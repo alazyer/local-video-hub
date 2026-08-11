@@ -90,10 +90,24 @@ export function resolveSafePath(inputPath: string): string | null {
 /**
  * 列出指定目录下的文件和子目录
  * @param dirPath 相对路径或绝对路径
+ * @param page 页码（从 1 开始），默认无分页
+ * @param pageSize 每页条数，默认无分页
+ *
+ * 分页时：先按 Dirent 计算排序键（目录优先 > 视频 > 其他 > 名称），再切片，
+ * 只对当前页的条目做 fs.stat（避免对全量文件 stat）。total 为该目录 Dirent 总数。
  */
 export async function listDirectory(
   dirPath: string,
-): Promise<{ items: VideoFileInfo[]; root: string; relativePath: string }> {
+  page?: number,
+  pageSize?: number,
+): Promise<{
+  items: VideoFileInfo[];
+  root: string;
+  relativePath: string;
+  total: number;
+  page?: number;
+  pageSize?: number;
+}> {
   const absPath = resolveSafePath(dirPath);
   if (!absPath) {
     throw new Error("非法路径");
@@ -121,13 +135,49 @@ export async function listDirectory(
     throw e;
   }
 
+  // 排序键仅依赖 Dirent（name + isDirectory + ext），无需 stat
+  type SortKey = {
+    name: string;
+    isDirectory: boolean;
+    isVideo: boolean;
+    ext: string;
+    entry: fsSync.Dirent;
+  };
+  const keyed: SortKey[] = entries.map((entry) => {
+    const ext = entry.name.split(".").pop()?.toLowerCase() || "";
+    return {
+      name: entry.name,
+      isDirectory: entry.isDirectory(),
+      isVideo: !entry.isDirectory() && VIDEO_EXTENSIONS.includes(ext),
+      ext,
+      entry,
+    };
+  });
+  keyed.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+    if (a.isVideo !== b.isVideo) return a.isVideo ? -1 : 1;
+    return a.name.localeCompare(b.name, "zh-CN");
+  });
+
+  const total = keyed.length;
+
+  // 分页：仅对当前页切片做 stat
+  const usePaging =
+    typeof page === "number" &&
+    typeof pageSize === "number" &&
+    page >= 1 &&
+    pageSize >= 1;
+  const start = usePaging ? (page! - 1) * pageSize! : 0;
+  const end = usePaging ? start + pageSize! : total;
+  const pageKeys = usePaging ? keyed.slice(start, end) : keyed;
+
   const items: VideoFileInfo[] = await Promise.all(
-    entries.map(async (entry) => {
+    pageKeys.map(async (k) => {
+      const entry = k.entry;
       const entryAbsPath = path.join(absPath, entry.name);
       const entryRelPath = path.join(relativePath, entry.name);
-      const ext = entry.name.split(".").pop()?.toLowerCase() || "";
 
-      if (entry.isDirectory()) {
+      if (k.isDirectory) {
         return {
           name: entry.name,
           path: entryRelPath,
@@ -140,7 +190,7 @@ export async function listDirectory(
         };
       }
 
-      // 文件：获取 stat
+      // 文件：获取 stat（仅当前页）
       let stat: fsSync.Stats;
       try {
         stat = await fs.stat(entryAbsPath);
@@ -148,8 +198,7 @@ export async function listDirectory(
         stat = { size: 0, mtimeMs: 0 } as fsSync.Stats;
       }
 
-      const isVideo = VIDEO_EXTENSIONS.includes(ext);
-      const browserSupported = BROWSER_NATIVE_EXTENSIONS.includes(ext);
+      const browserSupported = BROWSER_NATIVE_EXTENSIONS.includes(k.ext);
 
       return {
         name: entry.name,
@@ -157,19 +206,14 @@ export async function listDirectory(
         size: stat.size,
         mtime: stat.mtimeMs,
         isDirectory: false,
-        isVideo,
+        isVideo: k.isVideo,
         browserSupported,
-        ext,
+        ext: k.ext,
       };
     }),
   );
 
-  // 排序：目录优先，然后视频，然后按名称
-  items.sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-    if (a.isVideo !== b.isVideo) return a.isVideo ? -1 : 1;
-    return a.name.localeCompare(b.name, "zh-CN");
-  });
-
-  return { items, root, relativePath };
+  return usePaging
+    ? { items, root, relativePath, total, page, pageSize }
+    : { items, root, relativePath, total };
 }

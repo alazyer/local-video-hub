@@ -35,6 +35,13 @@ interface DlinkCacheEntry {
 const dlinkCache = new Map<string, DlinkCacheEntry>();
 const DLINK_CACHE_TTL = 7 * 60 * 60 * 1000; // 7 小时（百度直链 8 小时过期，留 1h 余量）
 
+function inferManifestMimeType(url: string): string | null {
+  const lower = url.toLowerCase();
+  if (lower.includes(".m3u8")) return "application/vnd.apple.mpegurl";
+  if (lower.includes(".mpd")) return "application/dash+xml";
+  return null;
+}
+
 async function getCachedDlink(fsId: string): Promise<string> {
   const cached = dlinkCache.get(fsId);
   if (cached && Date.now() < cached.expireAt) {
@@ -112,7 +119,11 @@ export async function GET(req: NextRequest) {
       }
     }
     // 默认 Content-Type 兜底
-    if (!respHeaders.has("content-type")) {
+    const manifestMimeType = inferManifestMimeType(dlink);
+    if (manifestMimeType) {
+      respHeaders.set("content-type", manifestMimeType);
+      respHeaders.set("x-streaming-diagnostic", "manifest-proxied-with-cors");
+    } else if (!respHeaders.has("content-type")) {
       respHeaders.set("content-type", "video/mp4");
     }
     // 必须声明支持 Range，否则 <video> 不能拖动

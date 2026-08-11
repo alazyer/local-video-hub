@@ -27,6 +27,22 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { formatDuration } from "@/lib/video-db";
+import {
+  resolveSources,
+  type NormalizedSource,
+} from "@/lib/source-resolver";
+import { evaluateCapabilities } from "@/lib/capability-evaluator";
+import { createFallbackState, nextFallbackSource } from "@/lib/fallback-policy";
+import {
+  emitPlaybackEvent,
+  type PlaybackEventEmitter,
+} from "@/lib/playback-telemetry";
+import { evaluateDrmGate, type DrmRequirement } from "@/lib/drm-gate";
+import {
+  createVideoJsLikePlayer,
+  type CreatePlayerResult,
+  type VideoJsLikePlayer,
+} from "@/lib/videojs-adapter";
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const SEEK_STEP = 10;
@@ -34,6 +50,8 @@ const SEEK_STEP = 10;
 interface VideoPlayerProps {
   /** 当前视频源 URL（blob: URL 或 object URL） */
   src: string | null;
+  /** 标准化后的候选源（可选） */
+  sources?: NormalizedSource[];
   /** 当前视频名称 */
   title?: string;
   /** 上次播放位置（秒），用于断点续播 */
@@ -50,10 +68,15 @@ interface VideoPlayerProps {
   onPrev?: () => void;
   /** 切换到下一个 */
   onNext?: () => void;
+  /** 播放遥测回调 */
+  onPlaybackEvent?: PlaybackEventEmitter;
+  /** DRM 要求（有值时启用 capability gate） */
+  drmRequirement?: DrmRequirement | null;
 }
 
 export function VideoPlayer({
   src,
+  sources,
   title,
   startPosition = 0,
   onPositionChange,
@@ -62,10 +85,17 @@ export function VideoPlayer({
   hasNext,
   onPrev,
   onNext,
+  onPlaybackEvent,
+  drmRequirement,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerRef = useRef<VideoJsLikePlayer | null>(null);
+  const runtimeStatusRef = useRef<CreatePlayerResult["status"] | null>(null);
+  const activeSourcesRef = useRef<NormalizedSource[]>([]);
+  const fallbackStateRef = useRef(createFallbackState(0));
+  const startupStartRef = useRef<number | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -80,6 +110,7 @@ export function VideoPlayer({
   const [showControls, setShowControls] = useState(true);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState(0);
+  const [playerReady, setPlayerReady] = useState(false);
 
   // 防止过于频繁地持久化位置
   const lastPersistRef = useRef(0);
@@ -93,14 +124,78 @@ export function VideoPlayer({
     startPositionRef.current = startPosition;
   }, [startPosition]);
 
+  // 初始化/销毁 Video.js 实例
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl || playerRef.current) return;
+
+    let cancelled = false;
+    void (async () => {
+      const result = await createVideoJsLikePlayer(videoEl);
+      if (cancelled) {
+        result.player.dispose();
+        return;
+      }
+      playerRef.current = result.player;
+      runtimeStatusRef.current = result.status;
+      setPlayerReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+      setPlayerReady(false);
+      playerRef.current?.dispose();
+      playerRef.current = null;
+      runtimeStatusRef.current = null;
+    };
+  }, []);
+
   // ----- 加载视频源 -----
   useEffect(() => {
     const v = videoRef.current;
-    if (!v || !src) return;
-    // 不在此处直接 setState（避免 effect 中同步 setState 触发级联渲染）
-    // 状态由 loadstart / waiting / canplay / error 等事件回调同步
-    v.src = src;
-    v.load();
+    const player = playerRef.current;
+    if (!v || !player || !playerReady) return;
+
+    if (!src) {
+      player.reset();
+      return;
+    }
+
+    const normalized = sources && sources.length > 0
+      ? sources
+      : resolveSources({ origin: "url", url: src });
+
+    const runtimeStatus = runtimeStatusRef.current;
+    const evaluated = evaluateCapabilities(normalized, v, {
+      dashFeatureEnabled: runtimeStatus?.dashFeatureEnabled ?? false,
+      dashPluginLoaded: runtimeStatus?.dashPluginLoaded ?? false,
+    });
+    const drmGate = evaluateDrmGate(drmRequirement, evaluated.capabilities.drmApiAvailable);
+    if (!drmGate.allowed) {
+      setError(drmGate.reason ?? "DRM 能力不足，无法播放");
+      emitPlaybackEvent(onPlaybackEvent, {
+        event: "drm-capability-failure",
+        timestamp: Date.now(),
+        src,
+        detail: drmGate.reason,
+      });
+      return;
+    }
+
+    if (evaluated.playableSources.length === 0) {
+      setError("当前浏览器不支持该流媒体协议");
+      setIsBuffering(false);
+      return;
+    }
+
+    activeSourcesRef.current = evaluated.playableSources;
+    fallbackStateRef.current = createFallbackState(0);
+    startupStartRef.current = Date.now();
+    setError(null);
+
+    const first = evaluated.playableSources[0];
+    player.src({ src: first.src, type: first.type });
+    player.load();
 
     const startPos = startPositionRef.current;
     if (startPos > 0) {
@@ -113,7 +208,7 @@ export function VideoPlayer({
       v.addEventListener("loadedmetadata", onLoaded);
     }
     // 仅依赖 src，不依赖 startPosition（避免每 5 秒触发 v.load() 导致视频暂停）
-  }, [src]);
+  }, [src, sources, drmRequirement, onPlaybackEvent, playerReady]);
 
   // ----- 事件监听 -----
   useEffect(() => {
@@ -156,10 +251,26 @@ export function VideoPlayer({
       setIsMuted(v.muted);
       setPlaybackRateState(v.playbackRate);
     };
-    const onWaiting = () => setIsBuffering(true);
+    const onWaiting = () => {
+      setIsBuffering(true);
+      emitPlaybackEvent(onPlaybackEvent, {
+        event: "buffering",
+        timestamp: Date.now(),
+        src: videoRef.current?.currentSrc,
+      });
+    };
     const onPlaying = () => {
       setIsBuffering(false);
       setIsPlaying(true);
+      if (startupStartRef.current) {
+        emitPlaybackEvent(onPlaybackEvent, {
+          event: "startup-latency",
+          timestamp: Date.now(),
+          src: videoRef.current?.currentSrc,
+          durationMs: Date.now() - startupStartRef.current,
+        });
+        startupStartRef.current = null;
+      }
     };
     const onCanPlay = () => setIsBuffering(false);
     const onEnded = () => {
@@ -167,7 +278,35 @@ export function VideoPlayer({
       onEnded?.();
     };
     const onError = () => {
-      setError("视频加载失败，可能是不支持的格式");
+      const sourceList = activeSourcesRef.current;
+      const sourceError = v.error?.message ?? "视频加载失败，可能是不支持的格式";
+      const decision = nextFallbackSource(
+        sourceList,
+        fallbackStateRef.current,
+        sourceError,
+      );
+      if (decision.nextIndex !== null && sourceList[decision.nextIndex]) {
+        const nextSource = sourceList[decision.nextIndex];
+        playerRef.current?.src({ src: nextSource.src, type: nextSource.type });
+        playerRef.current?.load();
+        emitPlaybackEvent(onPlaybackEvent, {
+          event: "fallback-success",
+          timestamp: Date.now(),
+          src: nextSource.src,
+          detail: decision.reason,
+          errorType: decision.errorType,
+        });
+        return;
+      }
+
+      emitPlaybackEvent(onPlaybackEvent, {
+        event: "fatal-error",
+        timestamp: Date.now(),
+        src: videoRef.current?.currentSrc,
+        detail: sourceError,
+        errorType: decision.errorType,
+      });
+      setError(sourceError);
       setIsBuffering(false);
     };
     const onVolumeChange = () => {
@@ -203,7 +342,7 @@ export function VideoPlayer({
       v.removeEventListener("volumechange", onVolumeChange);
       v.removeEventListener("ratechange", onRateChange);
     };
-  }, [onPositionChange, onEnded, isScrubbing]);
+  }, [onPositionChange, onEnded, isScrubbing, onPlaybackEvent]);
 
   // ----- 全屏状态 -----
   useEffect(() => {
@@ -407,6 +546,7 @@ export function VideoPlayer({
         <video
           ref={videoRef}
           className="w-full h-full object-contain"
+          preload="metadata"
           playsInline
           onClick={togglePlay}
         />

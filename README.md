@@ -150,11 +150,14 @@ python -m http.server 8000
 │   │   ├── url-videos.ts               # localStorage 封装（URL 视频）
 │   │   ├── server-videos.ts            # 服务器 fs 操作（服务端）
 │   │   ├── server-videos-shared.ts     # 共享常量（MIME、Range 解析）
+│   │   ├── source-resolver.ts          # 播放源标准化（HLS/DASH/渐进）
+│   │   ├── capability-evaluator.ts     # 浏览器能力判定（协议可播性）
+│   │   ├── fallback-policy.ts          # 播放失败回退策略
 │   │   ├── baidu-pan.ts                # 百度网盘 API 客户端
 │   │   └── pan-config-store.ts         # 网盘配置存储
 │   └── components/
 │       └── video-player/
-│           ├── video-player.tsx        # 核心播放器（含完整控制条）
+│           ├── videojs-player.tsx      # 核心播放器（流媒体能力 + 回退）
 │           ├── playlist.tsx            # 本地视频列表
 │           ├── url-videos.tsx          # URL 视频管理
 │           ├── server-browser.tsx      # 服务器文件浏览器
@@ -191,6 +194,7 @@ python -m http.server 8000
 | `VIDEO_ROOT` | `{project}/videos` | 服务器视频根目录，逗号分隔支持多目录 |
 | `HOST` | `localhost` | 监听地址，`0.0.0.0` 允许局域网访问 |
 | `ALLOW_PRIVATE_NETWORK` | `false` | URL 代理是否允许访问私网（localhost/192.168.x） |
+| `NEXT_PUBLIC_ENABLE_DASH_PLAYBACK` | `false` | 是否启用 DASH 播放链路（需 Video.js DASH 插件可用） |
 
 ### 视频格式兼容性
 
@@ -217,6 +221,7 @@ ffmpeg -i input.mkv -c:v libx264 -crf 23 -c:a aac output.mp4
 - [百度网盘接入方案](./docs/BAIDU_PAN_SOLUTION.md) — 网盘视频播放技术细节
 - [Android 打包指南](./docs/ANDROID_PACKAGING.md) — Capacitor 打包为 APK
 - [脚本说明](./scripts/README.md) — `scripts/` 目录中的开发、构建与部署辅助脚本
+- [Video.js Streaming OpenSpec](./openspec/changes/videojs-streaming-support/specs/videojs-streaming/spec.md) — 流媒体改造需求与验收场景
 
 ## 🔧 故障排查
 
