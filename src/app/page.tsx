@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
-import { VideoPlayer } from "@/components/video-player/video-player";
+import { VideoPlayer } from "@/components/video-player/videojs-player";
 import { Playlist } from "@/components/video-player/playlist";
 import { PanBrowser } from "@/components/video-player/pan-browser";
 import { ServerBrowser, type ServerVideoInfo } from "@/components/video-player/server-browser";
@@ -32,6 +32,8 @@ import {
 import type { BaiduPanFileInfo } from "@/lib/baidu-pan";
 import type { UrlVideo } from "@/lib/url-videos";
 import { cn } from "@/lib/utils";
+import { resolveSources, type NormalizedSource } from "@/lib/source-resolver";
+import type { PlaybackEventPayload } from "@/lib/playback-telemetry";
 
 /** 统一的"当前播放视频"模型，兼容本地、网盘、服务器、URL */
 interface CurrentPlayback {
@@ -43,6 +45,8 @@ interface CurrentPlayback {
   name: string;
   /** 视频 URL（本地为 blob URL，网盘为流代理 URL） */
   url: string;
+  /** 标准化视频源列表（用于流媒体能力与回退） */
+  sources: NormalizedSource[];
   /** 上次播放位置（秒） */
   startPosition: number;
   /** 文件大小（本地有，网盘有） */
@@ -151,6 +155,11 @@ export default function Home() {
         id: video.id,
         name: video.name,
         url,
+        sources: resolveSources({
+          origin: "local",
+          url,
+          mimeType: file.type || undefined,
+        }),
         startPosition: video.lastPosition ?? 0,
         size: video.size,
         thumbnail: video.thumbnail,
@@ -175,6 +184,10 @@ export default function Home() {
       id: String(video.fs_id),
       name: video.server_filename,
       url: streamUrl,
+      sources: resolveSources({
+        origin: "pan",
+        url: streamUrl,
+      }),
       startPosition: 0, // 网盘视频暂不支持断点续播（无法持久化到 IndexedDB）
       size: video.size,
       thumbnail: video.thumbnail,
@@ -195,6 +208,10 @@ export default function Home() {
       id: video.path,
       name: video.name,
       url: streamUrl,
+      sources: resolveSources({
+        origin: "server",
+        url: streamUrl,
+      }),
       startPosition: 0, // 服务器视频暂不支持断点续播
       size: video.size,
     });
@@ -218,6 +235,10 @@ export default function Home() {
         id: video.id,
         name: video.name,
         url: finalUrl,
+        sources: resolveSources({
+          origin: "url",
+          url: finalUrl,
+        }),
         startPosition: video.lastPosition ?? 0,
       });
     },
@@ -317,6 +338,10 @@ export default function Home() {
     [videos],
   );
 
+  const handlePlaybackEvent = useCallback((event: PlaybackEventPayload) => {
+    console.debug("[playback-event]", event);
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       {/* 顶部 Header */}
@@ -388,6 +413,7 @@ export default function Home() {
             >
               <VideoPlayer
                 src={current?.url ?? null}
+                sources={current?.sources}
                 title={current?.name}
                 startPosition={current?.startPosition ?? 0}
                 onPositionChange={handlePositionChange}
@@ -396,6 +422,7 @@ export default function Home() {
                 hasNext={hasNext}
                 onPrev={goToPrev}
                 onNext={goToNext}
+                onPlaybackEvent={handlePlaybackEvent}
               />
             </ErrorBoundary>
           </div>

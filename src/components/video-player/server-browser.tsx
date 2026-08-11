@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { formatFileSize } from "@/lib/server-videos-shared";
+import { PagerBar } from "./pager-bar";
 
 export interface ServerVideoInfo {
   name: string;
@@ -40,6 +41,9 @@ interface ListResult {
   items: ServerVideoInfo[];
   root: string;
   relativePath: string;
+  total?: number;
+  page?: number;
+  pageSize?: number;
   roots?: Array<{ path: string; name: string }>;
   error?: string;
   hint?: string;
@@ -52,38 +56,46 @@ export function ServerBrowser({ onSelectVideo, currentPath }: ServerBrowserProps
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
 
-  const fetchList = useCallback(async (dir: string) => {
-    setLoading(true);
-    setError(null);
-    setNotConfigured(false);
-    try {
-      const url = dir
-        ? `/api/server-file/list?dir=${encodeURIComponent(dir)}`
-        : "/api/server-file/list";
-      const res = await fetch(url);
-      const json = await res.json();
-      if (!res.ok) {
-        if (json.error?.includes("VIDEO_ROOT")) {
-          setNotConfigured(true);
-          return;
+  const fetchList = useCallback(
+    async (dir: string, p: number) => {
+      setLoading(true);
+      setError(null);
+      setNotConfigured(false);
+      try {
+        const params = new URLSearchParams();
+        if (dir) params.set("dir", dir);
+        params.set("page", String(p));
+        params.set("pageSize", String(PAGE_SIZE));
+        const url = `/api/server-file/list?${params.toString()}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!res.ok) {
+          if (json.error?.includes("VIDEO_ROOT")) {
+            setNotConfigured(true);
+            return;
+          }
+          throw new Error(json.error || `加载失败: HTTP ${res.status}`);
         }
-        throw new Error(json.error || `加载失败: HTTP ${res.status}`);
+        setData(json);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoading(false);
       }
-      setData(json);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    void fetchList(currentDir);
-  }, [currentDir, fetchList]);
+    void fetchList(currentDir, page);
+  }, [currentDir, page, fetchList]);
 
   const handleEnterDir = (item: ServerVideoInfo) => {
     setHistory((prev) => [...prev, currentDir]);
+    setPage(1);
     setCurrentDir(item.path);
   };
 
@@ -91,17 +103,30 @@ export function ServerBrowser({ onSelectVideo, currentPath }: ServerBrowserProps
     if (history.length === 0) return;
     const prev = history[history.length - 1];
     setHistory((prev2) => prev2.slice(0, -1));
+    setPage(1);
     setCurrentDir(prev);
   };
 
   const handleGoHome = () => {
     setHistory([]);
+    setPage(1);
     setCurrentDir("");
   };
 
   const handleRefresh = () => {
-    void fetchList(currentDir);
+    void fetchList(currentDir, page);
   };
+
+  // 虚拟根（多 VIDEO_ROOT）不参与分页：服务端在该路径不返回 page/pageSize
+  const total = data?.total ?? 0;
+  const showPager =
+    !!data &&
+    data.page != null &&
+    data.pageSize != null &&
+    total > PAGE_SIZE;
+  const pageCount = data?.pageSize
+    ? Math.max(1, Math.ceil(total / data.pageSize))
+    : 1;
 
   // ----- 未配置 VIDEO_ROOT -----
   if (notConfigured) {
@@ -198,6 +223,7 @@ export function ServerBrowser({ onSelectVideo, currentPath }: ServerBrowserProps
                           pathSegments.slice(0, i + 1).join("/")
                         ),
                       ]);
+                      setPage(1);
                       setCurrentDir(fullPath);
                     }}
                     className={cn(
@@ -345,6 +371,20 @@ export function ServerBrowser({ onSelectVideo, currentPath }: ServerBrowserProps
           </div>
         )}
       </ScrollArea>
+
+      {/* 分页（虚拟根目录不参与分页） */}
+      {showPager && data && (
+        <div className="border-t">
+          <PagerBar
+            page={page}
+            pageCount={pageCount}
+            hasPrev={page > 1}
+            hasNext={page < pageCount}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(pageCount, p + 1))}
+          />
+        </div>
+      )}
 
       {/* 底部提示 */}
       {data?.root && (

@@ -50,6 +50,8 @@ import {
   isSameOrigin,
   type UrlVideo,
 } from "@/lib/url-videos";
+import { usePagination } from "@/hooks/use-pagination";
+import { PagerBar } from "./pager-bar";
 
 interface UrlVideosProps {
   onSelectVideo: (video: UrlVideo, useProxy: boolean) => void;
@@ -84,6 +86,15 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
         v.note?.toLowerCase().includes(q),
     );
   }, [videos, search]);
+
+  const PAGE_SIZE = 50;
+  const {
+    paginatedItems,
+    page,
+    pageCount,
+    nextPage,
+    prevPage,
+  } = usePagination(filtered, PAGE_SIZE);
 
   const handleAdd = async () => {
     setAdding(true);
@@ -329,7 +340,7 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
           <EmptyUrlList hasVideos={videos.length > 0} search={search} />
         ) : (
           <ul className="p-2 space-y-1">
-            {filtered.map((video) => (
+            {paginatedItems.map((video) => (
               <UrlVideoItem
                 key={video.id}
                 video={video}
@@ -342,6 +353,20 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
           </ul>
         )}
       </ScrollArea>
+
+      {/* 分页（条数 ≤ 每页时隐藏） */}
+      {filtered.length > PAGE_SIZE && (
+        <div className="border-t">
+          <PagerBar
+            page={page}
+            pageCount={pageCount}
+            hasPrev={page > 1}
+            hasNext={page < pageCount}
+            onPrev={prevPage}
+            onNext={nextPage}
+          />
+        </div>
+      )}
 
       {/* 底部 */}
       {videos.length > 0 && (

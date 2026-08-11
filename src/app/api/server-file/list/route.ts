@@ -13,6 +13,8 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const dir = req.nextUrl.searchParams.get("dir") || "";
+  const pageParam = req.nextUrl.searchParams.get("page");
+  const pageSizeParam = req.nextUrl.searchParams.get("pageSize");
 
   try {
     // 如果 dir 为空，返回根目录列表
@@ -30,14 +32,15 @@ export async function GET(req: NextRequest) {
 
       // 如果只有一个根目录，直接列出该目录
       if (roots.length === 1) {
-        const result = await listDirectory("");
+        const { page, pageSize } = parsePaging(pageParam, pageSizeParam);
+        const result = await listDirectory("", page, pageSize);
         return NextResponse.json({
           ...result,
           roots: roots.map((r) => ({ path: r, name: r.split("/").pop() || r })),
         });
       }
 
-      // 多根目录：返回虚拟根列表
+      // 多根目录：返回虚拟根列表（不参与分页）
       return NextResponse.json({
         items: roots.map((r, i) => ({
           name: r.split("/").pop() || `根目录${i + 1}`,
@@ -52,11 +55,13 @@ export async function GET(req: NextRequest) {
         })),
         root: "",
         relativePath: "",
+        total: roots.length,
         roots: roots.map((r) => ({ path: r, name: r.split("/").pop() || r })),
       });
     }
 
-    const result = await listDirectory(dir);
+    const { page, pageSize } = parsePaging(pageParam, pageSizeParam);
+    const result = await listDirectory(dir, page, pageSize);
     return NextResponse.json({
       ...result,
       roots: getVideoRoots().map((r) => ({
@@ -68,4 +73,18 @@ export async function GET(req: NextRequest) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg }, { status: 400 });
   }
+}
+
+/** 解析分页参数；未提供时返回 undefined（lib 侧退回全量返回） */
+function parsePaging(
+  pageParam: string | null,
+  pageSizeParam: string | null,
+): { page?: number; pageSize?: number } {
+  const page = pageParam ? parseInt(pageParam, 10) : NaN;
+  const pageSize = pageSizeParam ? parseInt(pageSizeParam, 10) : NaN;
+  return {
+    page: Number.isFinite(page) && page >= 1 ? page : undefined,
+    pageSize:
+      Number.isFinite(pageSize) && pageSize >= 1 ? pageSize : undefined,
+  };
 }

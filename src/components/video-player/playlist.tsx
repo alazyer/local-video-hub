@@ -29,6 +29,8 @@ import {
   formatSize,
   type VideoMeta,
 } from "@/lib/video-db";
+import { usePagination } from "@/hooks/use-pagination";
+import { PagerBar } from "./pager-bar";
 
 interface PlaylistProps {
   videos: VideoMeta[];
@@ -84,6 +86,15 @@ export function Playlist({
     }
     return sorted;
   }, [videos, search, sortMode, currentId]);
+
+  const PAGE_SIZE = 50;
+  const {
+    paginatedItems,
+    page,
+    pageCount,
+    nextPage,
+    prevPage,
+  } = usePagination(filtered, PAGE_SIZE);
 
   return (
     <div className="flex flex-col h-full bg-card">
@@ -151,7 +162,7 @@ export function Playlist({
           />
         ) : (
           <ul className="p-2 space-y-1">
-            {filtered.map((video) => (
+            {paginatedItems.map((video) => (
               <PlaylistItem
                 key={video.id}
                 video={video}
@@ -163,6 +174,20 @@ export function Playlist({
           </ul>
         )}
       </ScrollArea>
+
+      {/* 分页（条数 ≤ 每页时隐藏） */}
+      {filtered.length > PAGE_SIZE && (
+        <div className="border-t">
+          <PagerBar
+            page={page}
+            pageCount={pageCount}
+            hasPrev={page > 1}
+            hasNext={page < pageCount}
+            onPrev={prevPage}
+            onNext={nextPage}
+          />
+        </div>
+      )}
 
       {/* 底部操作 */}
       {totalCount > 0 && (

@@ -22,6 +22,7 @@ import {
 } from "@/lib/baidu-pan";
 import { cn } from "@/lib/utils";
 import { BaiduPanSettings } from "./baidu-pan-settings";
+import { PagerBar } from "./pager-bar";
 
 interface PanBrowserProps {
   onSelectVideo: (video: BaiduPanFileInfo) => void;
@@ -31,7 +32,9 @@ interface PanBrowserProps {
 interface ListResult {
   dir: string;
   page: number;
-  total: number;
+  pageSize: number;
+  /** 是否还有下一页（百度 API 不返回总数，按 list.length >= pageSize 推断） */
+  hasMore: boolean;
   dirs: BaiduPanFileInfo[];
   videos: BaiduPanFileInfo[];
   others: BaiduPanFileInfo[];
@@ -46,15 +49,19 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
   const [error, setError] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
   const [configVersion, setConfigVersion] = useState(0);
+  const [page, setPage] = useState(1);
 
   const fetchList = useCallback(
-    async (dir: string) => {
+    async (dir: string, p: number) => {
       setLoading(true);
       setError(null);
       setNotConfigured(false);
       try {
+        const params = new URLSearchParams();
+        params.set("dir", dir);
+        params.set("page", String(p));
         const res = await fetch(
-          `/api/baidu-pan/list?dir=${encodeURIComponent(dir)}`,
+          `/api/baidu-pan/list?${params.toString()}`,
         );
         const json = await res.json();
         if (res.status === 401) {
@@ -63,6 +70,16 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
         }
         if (!res.ok) {
           throw new Error(json.error || `加载失败: HTTP ${res.status}`);
+        }
+        // 边界：恰好 N×pageSize 条 → 下一页返回空列表，视为末页
+        if (
+          json.list &&
+          json.list.length === 0 &&
+          p > 1 &&
+          json.hasMore === false
+        ) {
+          setPage((prev) => Math.max(1, prev - 1));
+          return;
         }
         setData(json);
       } catch (e) {
@@ -75,11 +92,12 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
   );
 
   useEffect(() => {
-    void fetchList(currentDir);
-  }, [currentDir, configVersion, fetchList]);
+    void fetchList(currentDir, page);
+  }, [currentDir, page, configVersion, fetchList]);
 
   const handleEnterDir = (dir: BaiduPanFileInfo) => {
     setHistory((prev) => [...prev, currentDir]);
+    setPage(1);
     setCurrentDir(dir.path);
   };
 
@@ -87,19 +105,22 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
     if (history.length === 0) return;
     const prev = history[history.length - 1];
     setHistory((prev2) => prev2.slice(0, -1));
+    setPage(1);
     setCurrentDir(prev);
   };
 
   const handleGoHome = () => {
     setHistory([]);
+    setPage(1);
     setCurrentDir("/");
   };
 
   const handleRefresh = () => {
-    void fetchList(currentDir);
+    void fetchList(currentDir, page);
   };
 
   const handleConfigChange = () => {
+    setPage(1);
     setConfigVersion((v) => v + 1);
   };
 
@@ -192,6 +213,7 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
                           (_, i) => "/" + pathSegments.slice(0, i + 1).join("/"),
                         ),
                       ]);
+                      setPage(1);
                       setCurrentDir(fullPath);
                     }}
                     className={cn(
@@ -326,6 +348,20 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
           </div>
         )}
       </ScrollArea>
+
+      {/* 分页：百度 API 无总数，仅显示“第 X 页”；多页或已翻页时显示 */}
+      {data && (page > 1 || data.hasMore) && (
+        <div className="border-t">
+          <PagerBar
+            page={page}
+            pageCount={null}
+            hasPrev={page > 1}
+            hasNext={data.hasMore}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => p + 1)}
+          />
+        </div>
+      )}
     </div>
   );
 }

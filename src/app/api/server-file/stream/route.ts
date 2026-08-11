@@ -80,8 +80,14 @@ export async function GET(req: NextRequest) {
   headers.set("Access-Control-Allow-Headers", "Range");
   headers.set(
     "Access-Control-Expose-Headers",
-    "Content-Range, Content-Length, Accept-Ranges",
+    "Content-Range, Content-Length, Accept-Ranges, X-Streaming-Diagnostic",
   );
+  if (
+    contentType === "application/vnd.apple.mpegurl" ||
+    contentType === "application/dash+xml"
+  ) {
+    headers.set("X-Streaming-Diagnostic", "manifest-served-with-cors");
+  }
 
   // 5. 处理 Range 请求 vs 完整文件
   if (range) {

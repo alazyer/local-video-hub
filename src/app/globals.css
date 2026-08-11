@@ -120,3 +120,12 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Video.js base surface keeps theme-compatible background in dark mode */
+.video-js {
+  background-color: #000;
+}
+
+.video-js .vjs-tech {
+  object-fit: contain;
+}
