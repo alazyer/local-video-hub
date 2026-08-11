@@ -89,12 +89,33 @@ bun run start
 
 详见 [`docs/LAN_SHARING_GUIDE.md`](./docs/LAN_SHARING_GUIDE.md)
 
-### 场景 2：用 python http.server 提供视频
+### 场景 2：跨操作系统启动 **支持 Range** 的视频静态服务器（推荐）
+
+> 不建议继续使用 `python -m http.server`：它在常见环境下会忽略 `Range` 请求，导致大文件 seek 体验差。
+
+按你所在系统选一个命令即可：
+
+| 操作系统 | 推荐命令（支持 Range） | 说明 |
+|---|---|---|
+| macOS | `cd /path/to/your/videos && ruby -run -e httpd . -p 8000` | 系统自带 Ruby，零安装，最省事 |
+| Linux | `cd /path/to/your/videos && caddy file-server --listen :8000 --root .` | Caddy 默认支持 Range，配置简单 |
+| Windows (PowerShell) | `Set-Location C:\path\to\videos; caddy file-server --listen :8000 --root .` | 推荐安装 Caddy 后使用 |
+| 任意系统（有 Node.js） | `npx http-server@14 /path/to/your/videos -p 8000 --cors` | 跨平台，常用，支持 Range |
+
+#### 自检：一条命令验证服务器是否支持 Range（推荐先跑）
+
+启动服务器后，在同一台机器执行：
 
 ```bash
-cd /path/to/your/videos
-python -m http.server 8000
+curl -i -H "Range: bytes=0-1023" "http://电脑IP:8000/视频.mp4"
 ```
+
+期望结果：
+- 状态码是 `206 Partial Content`
+- 响应头包含 `Content-Range: bytes 0-1023/总长度`
+- `Content-Length` 约为 `1024`
+
+若返回 `200 OK` 且 `Content-Length` 是整文件大小，说明该服务器未正确处理 Range，请换用上表推荐命令。
 
 在应用中切换到「URL」Tab → 点 `+` 添加 URL：
 - 输入 `http://电脑IP:8000/视频.mp4`
