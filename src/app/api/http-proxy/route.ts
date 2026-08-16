@@ -26,6 +26,7 @@ import {
   formatContentRange,
   createRangeSlicingStream,
 } from "@/lib/http-proxy-range";
+import { parseHttpUrl, isAddressAllowed } from "@/lib/http-proxy-security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,46 +40,8 @@ function inferManifestMimeType(pathname: string): string | null {
 
 /** 解析目标 URL 并校验安全性 */
 function parseTargetUrl(urlStr: string): URL | null {
-  let u: URL;
-  try {
-    u = new URL(urlStr);
-  } catch {
-    return null;
-  }
-  if (!["http:", "https:"].includes(u.protocol)) return null;
-  return u;
-}
-
-/**
- * 检查是否允许访问目标地址（防 SSRF）
- *
- * 默认拒绝私网地址（127.0.0.1 / 10.x / 192.168.x / 172.16-31.x 等）。
- * 用户在 .env 中设置 ALLOW_PRIVATE_NETWORK=true 可放开。
- */
-function isAddressAllowed(hostname: string): boolean {
-  const allowPrivate =
-    process.env.ALLOW_PRIVATE_NETWORK === "true" ||
-    process.env.ALLOW_PRIVATE_NETWORK === "1";
-
-  if (allowPrivate) return true;
-
-  // IPv4
-  const ipv4Match = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (ipv4Match) {
-    const [, a, b] = ipv4Match.map(Number) as unknown as number[];
-    if (a === 10) return false;
-    if (a === 127) return false;
-    if (a === 169 && b === 254) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 0) return false;
-    return true;
-  }
-  if (hostname === "::1" || hostname === "[::1]") return false;
-  if (hostname.startsWith("fe80")) return false;
-  if (hostname.startsWith("fc") || hostname.startsWith("fd")) return false;
-  if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
-  return true;
+  const parsed = parseHttpUrl(urlStr);
+  return parsed.ok ? parsed.url ?? null : null;
 }
 
 /**
