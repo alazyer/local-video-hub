@@ -154,7 +154,7 @@ export function Playlist({
       </div>
 
       {/* 列表 */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {filtered.length === 0 ? (
           <EmptyPlaylist
             hasVideos={totalCount > 0}
