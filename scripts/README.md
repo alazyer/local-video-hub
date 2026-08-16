@@ -18,6 +18,12 @@
 # 本地开发
 ./scripts/dev.sh
 
+# 快速本地检查（lint + typecheck）
+bun run check
+
+# 提交/推送前完整验证（lint + typecheck + test + build）
+./scripts/verify.sh
+
 # 仅构建 Web 应用
 bun run build
 
