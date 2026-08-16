@@ -38,6 +38,7 @@ import {
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import {
   addUrlVideo,
@@ -75,6 +76,10 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [remoteImportDialogOpen, setRemoteImportDialogOpen] = useState(false);
+  const [remoteImportUrl, setRemoteImportUrl] = useState("");
+  const [remoteImportMode, setRemoteImportMode] = useState<"merge" | "replace">("merge");
+  const [remoteImporting, setRemoteImporting] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -184,6 +189,73 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
     }
   };
 
+  const handleImportFromUrl = async () => {
+    if (!remoteImportUrl.trim()) {
+      setImportMessage("导入失败：URL 不能为空");
+      return;
+    }
+
+    const validation = isValidVideoUrl(remoteImportUrl);
+    if (!validation.valid) {
+      setImportMessage(`导入失败：${validation.reason ?? "URL 不合法"}`);
+      return;
+    }
+
+    setRemoteImporting(true);
+    setImportMessage(null);
+
+    const previousVideos = loadUrlVideos();
+
+    try {
+      const response = await fetch("/api/url-playlist/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: remoteImportUrl.trim() }),
+      });
+
+      const data = (await response.json().catch(() => null)) as {
+        payload?: unknown;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !data?.payload) {
+        setImportMessage(`导入失败：${data?.error ?? `请求失败（${response.status}）`}`);
+        return;
+      }
+
+      const importResult = importUrlVideosPayload(data.payload, remoteImportMode);
+      if (!importResult.success) {
+        if (remoteImportMode === "replace") {
+          // replace 模式导入失败时回滚
+          const rollbackPayload = { videos: previousVideos };
+          const rollbackResult = importUrlVideosPayload(rollbackPayload, "replace");
+          if (!rollbackResult.success) {
+            setImportMessage(
+              `导入失败：${importResult.error}；且回滚失败，请手动重新导入备份`,
+            );
+            return;
+          }
+        }
+        setImportMessage(`导入失败：${importResult.error}`);
+        return;
+      }
+
+      const { imported, duplicates, invalid, total } = importResult.result;
+      setImportMessage(
+        `导入完成：共 ${total} 条，新增 ${imported} 条，重复 ${duplicates} 条，无效 ${invalid} 条（模式：${remoteImportMode}）`,
+      );
+      setRemoteImportDialogOpen(false);
+      setRemoteImportUrl("");
+      setRemoteImportMode("merge");
+      refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setImportMessage(`导入失败：${msg}`);
+    } finally {
+      setRemoteImporting(false);
+    }
+  };
+
   const handleSelect = (video: UrlVideo) => {
     // 同源 URL 直连；跨域 URL 也直连（绝大多数服务器支持 CORS 或 <video> 标签豁免）
     // 跨域 seek 受限的极端情况，用户可在右键菜单选"通过代理播放"
@@ -218,7 +290,7 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
               size="icon"
               onClick={() => void handleImport()}
               className="h-7 w-7"
-              title="导入 URL 播放列表"
+              title="导入 URL 播放列表（本地文件）"
               disabled={importing}
             >
               {importing ? (
@@ -227,6 +299,87 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
                 <Download className="w-3.5 h-3.5" />
               )}
             </Button>
+            <Dialog
+              open={remoteImportDialogOpen}
+              onOpenChange={setRemoteImportDialogOpen}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="通过 URL 导入播放列表"
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Globe className="w-4 h-4" />
+                    通过 URL 导入播放列表
+                  </DialogTitle>
+                  <DialogDescription>
+                    支持现有 JSON 播放列表格式（包含 videos 数组），可选择 merge 或 replace 导入模式。
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="remote-playlist-url">播放列表 URL *</Label>
+                    <Input
+                      id="remote-playlist-url"
+                      value={remoteImportUrl}
+                      onChange={(e) => setRemoteImportUrl(e.target.value)}
+                      placeholder="https://example.com/url-playlist.json"
+                      className="mt-1 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>导入模式</Label>
+                    <RadioGroup
+                      value={remoteImportMode}
+                      onValueChange={(value) =>
+                        setRemoteImportMode(value === "replace" ? "replace" : "merge")
+                      }
+                      className="gap-2"
+                    >
+                      <label className="flex items-start gap-2 rounded border p-2 cursor-pointer">
+                        <RadioGroupItem value="merge" id="remote-import-merge" />
+                        <div className="text-xs leading-relaxed">
+                          <p className="font-medium">merge（默认）</p>
+                          <p className="text-muted-foreground">与现有列表合并，按 URL 去重。</p>
+                        </div>
+                      </label>
+                      <label className="flex items-start gap-2 rounded border p-2 cursor-pointer">
+                        <RadioGroupItem value="replace" id="remote-import-replace" />
+                        <div className="text-xs leading-relaxed">
+                          <p className="font-medium">replace</p>
+                          <p className="text-muted-foreground">替换现有列表，导入失败时会回滚。</p>
+                        </div>
+                      </label>
+                    </RadioGroup>
+                  </div>
+
+                  {remoteImportUrl && <UrlValidationHint url={remoteImportUrl} />}
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setRemoteImportDialogOpen(false)}
+                    disabled={remoteImporting}
+                  >
+                    取消
+                  </Button>
+                  <Button onClick={() => void handleImportFromUrl()} disabled={remoteImporting}>
+                    {remoteImporting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+                    导入
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <Button
               variant="ghost"
               size="icon"
@@ -335,7 +488,7 @@ export function UrlVideos({ onSelectVideo, currentId }: UrlVideosProps) {
       </div>
 
       {/* 列表 */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {filtered.length === 0 ? (
           <EmptyUrlList hasVideos={videos.length > 0} search={search} />
         ) : (
