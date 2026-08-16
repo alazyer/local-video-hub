@@ -27,6 +27,8 @@ interface FileSystemHandlePermissionDescriptor {
   mode?: "read" | "readwrite";
 }
 interface FileSystemHandle {
+  kind: "file" | "directory";
+  name: string;
   queryPermission: (
     descriptor?: FileSystemHandlePermissionDescriptor,
   ) => Promise<PermissionState>;
@@ -34,17 +36,15 @@ interface FileSystemHandle {
     descriptor?: FileSystemHandlePermissionDescriptor,
   ) => Promise<PermissionState>;
 }
-interface FileSystemDirectoryHandle {
+interface FileSystemDirectoryHandle extends FileSystemHandle {
   kind: "directory";
-  name: string;
-  values: () => AsyncIterableIterator<FileSystemHandle | FileSystemDirectoryHandle>;
+  values: () => AsyncIterableIterator<FileSystemFileHandle | FileSystemDirectoryHandle>;
   [Symbol.asyncIterator]: () => AsyncIterableIterator<
-    FileSystemHandle | FileSystemDirectoryHandle
+    FileSystemFileHandle | FileSystemDirectoryHandle
   >;
 }
-interface FileSystemFileHandle {
+interface FileSystemFileHandle extends FileSystemHandle {
   kind: "file";
-  name: string;
   getFile: () => Promise<File>;
 }
 interface WindowWithFSAccess extends Window {
@@ -299,21 +299,20 @@ async function collectVideoFiles(
   if (depth > 3) return; // 防止过深递归
   for await (const entry of dir.values()) {
     if (entry.kind === "file") {
-      const fileHandle = entry as FileSystemFileHandle;
-      if (isVideoFileByName(fileHandle.name)) {
+      if (isVideoFileByName(entry.name)) {
         try {
-          const file = await fileHandle.getFile();
+          const file = await entry.getFile();
           collected.push(file);
           if (collected.length % 10 === 0) {
             onProgress?.(`已扫描到 ${collected.length} 个视频...`);
           }
         } catch (e) {
-          console.warn("读取文件失败", fileHandle.name, e);
+          console.warn("读取文件失败", entry.name, e);
         }
       }
-    } else if (entry.kind === "directory") {
+    } else {
       await collectVideoFiles(
-        entry as FileSystemDirectoryHandle,
+        entry,
         collected,
         onProgress,
         depth + 1,
