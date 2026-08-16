@@ -75,6 +75,17 @@ bun run build
 bun run start
 ```
 
+### 5. 开发反馈循环（推荐）
+
+为了在本地快速发现问题并保持与 CI 一致，建议按以下节奏执行：
+
+- **快速本地循环（每次改动后）**：`bun run check`
+  - 包含：`lint + typecheck`
+- **广义验证循环（提交或推送前）**：`bun run check:full`
+  - 包含：`lint + typecheck + test + build`
+- **一键验证脚本**：`./scripts/verify.sh`
+  - 内部执行 `bun run check:full`，并返回明确的成功/失败退出码
+
 ## 📖 使用场景
 
 ### 场景 1：平板看电脑里的学习视频（推荐）
@@ -219,6 +230,8 @@ curl -i -H "Range: bytes=0-1023" "http://电脑IP:8000/视频.mp4"
 
 ### 视频格式兼容性
 
+播放基于浏览器原生 `<video>` 元素，无需任何 CDN 运行时，离线/局域网可用。
+
 | 格式 | 浏览器原生支持 | 备注 |
 |------|--------------|------|
 | MP4 (H.264 + AAC) | ✅ 完美 | **强烈推荐** |
@@ -226,6 +239,7 @@ curl -i -H "Range: bytes=0-1023" "http://电脑IP:8000/视频.mp4"
 | MOV / M4V | ✅ 多数支持 | |
 | MKV (H.264 + AAC) | ⚠️ 部分 | AC3/DTS 音轨会无声 |
 | MKV (HEVC) / AVI / FLV / WMV / RMVB | ❌ 不支持 | 需 ffmpeg 转码 |
+| HLS (.m3u8) | ✅ Safari/iOS 原生 | 非 Safari 浏览器需 MSE 支持，暂未引入 polyfill |
 
 转码命令：
 ```bash

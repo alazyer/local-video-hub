@@ -61,14 +61,6 @@ export function BaiduPanSettings({ onConfigChange }: BaiduPanSettingsProps) {
   const [authCode, setAuthCode] = useState("");
   const [redirectUri, setRedirectUri] = useState("");
 
-  useEffect(() => {
-    if (open) {
-      void refreshStatus();
-      // 自动填回调地址
-      setRedirectUri(`${window.location.origin}/api/baidu-pan/auth/callback`);
-    }
-  }, [open]);
-
   const refreshStatus = async () => {
     try {
       const res = await fetch("/api/baidu-pan/auth?action=status");
@@ -78,6 +70,18 @@ export function BaiduPanSettings({ onConfigChange }: BaiduPanSettingsProps) {
       console.warn("获取状态失败", e);
     }
   };
+
+  useEffect(() => {
+    if (!open) return;
+
+    const timer = window.setTimeout(() => {
+      void refreshStatus();
+      // 自动填回调地址
+      setRedirectUri(`${window.location.origin}/api/baidu-pan/auth/callback`);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   // 模式 1: 手动填 token
   const handleSaveManual = async () => {
