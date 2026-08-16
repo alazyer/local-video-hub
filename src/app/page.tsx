@@ -34,6 +34,10 @@ import type { UrlVideo } from "@/lib/url-videos";
 import { cn } from "@/lib/utils";
 import { resolveSources, type NormalizedSource } from "@/lib/source-resolver";
 import type { PlaybackEventPayload } from "@/lib/playback-telemetry";
+import {
+  parseVideoPlayerTab,
+  type VideoPlayerTab,
+} from "@/lib/video-player-tab";
 
 /** 统一的"当前播放视频"模型，兼容本地、网盘、服务器、URL */
 interface CurrentPlayback {
@@ -70,28 +74,28 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   /** 侧边栏激活的 Tab：local 本地 / url URL / server 服务器 / pan 网盘
    *  持久化到 localStorage，避免页面意外刷新后回到默认 Tab */
-  const [activeTab, setActiveTabState] = useState<"local" | "url" | "server" | "pan">(
-    () => {
-      if (typeof window === "undefined") return "local";
-      const saved = window.localStorage.getItem("video-player:active-tab");
-      if (saved === "local" || saved === "url" || saved === "server" || saved === "pan") {
-        return saved;
-      }
-      return "local";
-    },
-  );
-  const setActiveTab = useCallback(
-    (tab: "local" | "url" | "server" | "pan") => {
-      setActiveTabState(tab);
+  const [activeTab, setActiveTabState] = useState<VideoPlayerTab>("local");
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
       try {
-        window.localStorage.setItem("video-player:active-tab", tab);
+        const saved = window.localStorage.getItem("video-player:active-tab");
+        setActiveTabState(parseVideoPlayerTab(saved));
       } catch (e) {
         // localStorage 不可用时静默失败
         console.debug("localStorage 不可用", e);
       }
-    },
-    [],
-  );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const setActiveTab = useCallback((tab: VideoPlayerTab) => {
+    setActiveTabState(tab);
+    try {
+      window.localStorage.setItem("video-player:active-tab", tab);
+    } catch (e) {
+      // localStorage 不可用时静默失败
+      console.debug("localStorage 不可用", e);
+    }
+  }, []);
 
   // 用于在切换视频前释放上一个 ObjectURL（仅本地视频需要）
   const previousLocalUrlRef = useRef<string | null>(null);
@@ -99,7 +103,10 @@ export default function Home() {
   const lastPersistRef = useRef(0);
 
   useEffect(() => {
-    setMounted(true);
+    const timer = window.setTimeout(() => {
+      setMounted(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // 加载本地视频列表
@@ -116,14 +123,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    void refreshList();
+    const timer = window.setTimeout(() => {
+      void refreshList();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [refreshList]);
-
-  // 当前视频对象（本地）
-  const currentLocalVideo = useMemo(
-    () => videos.find((v) => v.id === current?.id) ?? null,
-    [videos, current],
-  );
 
   // 当前视频在本地列表中的位置
   const currentIdx = useMemo(
@@ -427,57 +431,27 @@ export default function Home() {
             </ErrorBoundary>
           </div>
 
-          {/* 当前播放信息条 */}
+          {/* 当前播放操作条（仅保留切换控制） */}
           {current && (
-            <div className="flex-shrink-0 bg-background border-t px-3 md:px-4 py-2 flex items-center justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate flex items-center gap-2">
-                  {current.source === "pan" && (
-                    <Cloud className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                  )}
-                  {current.source === "local" && (
-                    <HardDrive className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
-                  )}
-                  {current.source === "server" && (
-                    <Server className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
-                  )}
-                  {current.source === "url" && (
-                    <LinkIcon className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
-                  )}
-                  <span className="truncate">{current.name}</span>
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {current.source === "pan"
-                    ? "正在播放 · 百度网盘（通过流代理）"
-                    : current.source === "server"
-                      ? "正在播放 · 服务器文件（局域网流式传输）"
-                      : current.source === "url"
-                        ? `正在播放 · URL${current.url.startsWith("/api/http-proxy") ? "（代理模式）" : ""}`
-                        : currentLocalVideo?.lastPosition && currentLocalVideo?.duration
-                          ? `正在播放 · 上次播放到 ${Math.floor(currentLocalVideo.lastPosition)}s`
-                          : "正在播放 · 本地"}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={goToPrev}
-                  disabled={!hasPrev}
-                  className="h-8"
-                >
-                  上一个
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={goToNext}
-                  disabled={!hasNext}
-                  className="h-8"
-                >
-                  下一个
-                </Button>
-              </div>
+            <div className="flex-shrink-0 bg-background border-t px-3 md:px-4 py-2 flex items-center justify-end gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={goToPrev}
+                disabled={!hasPrev}
+                className="h-8"
+              >
+                上一个
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={goToNext}
+                disabled={!hasNext}
+                className="h-8"
+              >
+                下一个
+              </Button>
             </div>
           )}
         </main>
