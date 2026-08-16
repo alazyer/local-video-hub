@@ -92,7 +92,10 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
   );
 
   useEffect(() => {
-    void fetchList(currentDir, page);
+    const timer = window.setTimeout(() => {
+      void fetchList(currentDir, page);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [currentDir, page, configVersion, fetchList]);
 
   const handleEnterDir = (dir: BaiduPanFileInfo) => {
@@ -252,7 +255,7 @@ export function PanBrowser({ onSelectVideo, currentFsId }: PanBrowserProps) {
       )}
 
       {/* 文件列表 */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {loading && !data ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <Loader2 className="w-6 h-6 mb-2 animate-spin" />
